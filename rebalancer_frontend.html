@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paxos Autorebalancer - Functional Frontend</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
+    <style>
+        /* --- Base Styles & Font (Paxos/USDL Inspired) --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        :root {
+            --blue-primary: #0052FF; --blue-dark: #0048E5; --text-dark: #1E293B; --text-medium: #334155; --text-light: #64748B; --border-light: #E2E8F0; --border-medium: #CBD5E1; --bg-light: #F8FAFC; --bg-white: #FFFFFF; --green-status: #16A34A; --red-status: #DC2626; --orange-status: #F59E0B; --green-button: #16A34A; --green-button-hover: #15803d; --grey-button-bg: #F1F5F9; --grey-button-text: #475569; --grey-button-border: #E2E8F0; --grey-button-hover-bg: #E2E8F0; --grey-button-hover-border: #CBD5E1; --disabled-bg: #F1F5F9; --disabled-text: #94A3B8; --disabled-border: #E2E8F0;
+        }
+        body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: var(--bg-light); color: var(--text-dark); font-size: 14px; line-height: 1.6; min-height: 100vh; }
+        .container { display: flex; flex-wrap: wrap; padding: 25px; gap: 30px; max-width: 1400px; margin: 0 auto; }
+        .column { flex: 1; min-width: 450px; /* Ensure columns have enough space */ }
+        h1 { color: var(--text-dark); margin-bottom: 30px; font-weight: 600; font-size: 1.8em; text-align: center; width: 100%; padding-top: 10px; }
+        h2 { font-weight: 600; padding: 0 0 15px 0; margin: 0 0 20px 0; color: var(--text-dark); font-size: 1.2em; border-bottom: 1px solid var(--border-light); }
+        h3 { font-size: 1.1em; font-weight: 600; color: var(--text-dark); margin-top: 0; margin-bottom: 15px; }
+
+        /* --- Frame Styling --- */
+        .frame { border: 1px solid var(--border-light); border-radius: 10px; padding: 25px 30px; margin-bottom: 25px; background-color: var(--bg-white); box-shadow: 0 4px 15px rgba(0, 82, 255, 0.04), 0 1px 3px rgba(0, 0, 0, 0.04); }
+
+        /* --- Labels & Input Fields --- */
+        label { display: block; color: var(--text-medium); font-weight: 500; margin-bottom: 6px; }
+        input[type="text"], input[type="number"], textarea { padding: 10px 14px; margin-bottom: 15px; border: 1px solid var(--border-medium); border-radius: 6px; box-sizing: border-box; background-color: var(--bg-white); color: var(--text-dark); font-size: 14px; width: 100%; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+        input:focus, textarea:focus { border-color: var(--blue-primary); outline: none; box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.15); }
+        input[type="text"]:disabled, input[type="number"]:disabled, textarea:disabled, button:disabled { background-color: var(--disabled-bg); color: var(--disabled-text); border-color: var(--disabled-border); cursor: not-allowed; opacity: 0.9; box-shadow: none; }
+
+        /* --- Buttons --- */
+        button { padding: 10px 20px; margin: 5px 5px 10px 0; border: none; border-radius: 6px; background-color: var(--blue-primary); color: white; cursor: pointer; font-weight: 500; font-size: 14px; transition: all 0.2s ease-in-out; text-align: center; box-shadow: 0 2px 5px rgba(0, 82, 255, 0.1); }
+        button:hover:not(:disabled) { background-color: var(--blue-dark); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0, 82, 255, 0.15); }
+        button:active:not(:disabled) { transform: translateY(0px); box-shadow: 0 1px 3px rgba(0, 82, 255, 0.1); }
+        button:disabled { background-color: var(--disabled-bg); color: var(--disabled-text); border: 1px solid var(--disabled-border); box-shadow: none; }
+        .inline-group { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 15px; }
+        .inline-group > div { flex: 1; }
+        .inline-group button { margin-top: 5px; margin-bottom: 0; flex-shrink: 0; }
+        .approve-button { background-color: var(--grey-button-bg); color: var(--grey-button-text); border: 1px solid var(--grey-button-border); }
+        .approve-button:hover:not(:disabled) { background-color: var(--grey-button-hover-bg); border-color: var(--grey-button-hover-border); }
+
+        /* --- Status Layout --- */
+        .status-section { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-light); }
+        .status-section:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+        .status-item { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; align-items: center; flex-wrap: wrap; }
+        .status-label { color: var(--text-light); font-weight: 400; text-align: left; padding-right: 15px; flex-shrink: 0; margin-bottom: 2px; }
+        .status-value { font-weight: 500; color: var(--text-medium); text-align: right; word-break: break-all; margin-bottom: 2px; }
+        .status-value.prominent { font-weight: 600; color: var(--text-dark); font-size: 1.05em; }
+        .status-value.connected { color: var(--green-status); }
+        .status-value.disconnected { color: var(--text-light); }
+        .status-value.error { color: var(--red-status); font-weight: 600; }
+        .status-value.warning { color: var(--orange-status); font-weight: 600;}
+        .status-value.rebal-yes { color: var(--red-status); font-weight: 600; }
+        .status-value.rebal-no { color: var(--green-status); }
+
+        /* --- Transaction Status / Logs --- */
+        #txStatusArea, #logArea { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 0.9em; line-height: 1.5; color: #475569; height: 80px; background-color: var(--bg-light); margin-top: 10px; width: 100%; box-sizing: border-box; border: 1px solid var(--border-light); border-radius: 6px; padding: 8px; overflow-y: auto; }
+        #logArea { height: 150px; }
+        .hidden { display: none !important; }
+        .address-display { font-family: monospace; font-size: 0.9em; word-break: break-all; color: var(--text-light); }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid var(--blue-primary); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-left: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Paxos Autorebalancer</h1>
+
+        <div class="column">
+
+            <fieldset class="frame">
+                <h2>Connect & Load Contract</h2>
+                <div class="config-grid-item">
+                    <button id="btnConnectWallet" onclick="connectWallet()">Connect Wallet</button>
+                    <div style="margin-top: 10px; font-size: 0.9em;">
+                        <span class="status-label">Status:</span> <span id="connectionStatus" class="status-value disconnected">Not Connected</span><br>
+                        <span class="status-label">Account:</span> <span id="accountAddress" class="status-value address-display">N/A</span><br>
+                        <span class="status-label">Network:</span> <span id="networkName" class="status-value">N/A</span>
+                    </div>
+                </div>
+                 <div class="config-grid-item">
+                    <label for="nodeUrl">Node RPC URL (Optional - uses Wallet if blank):</label>
+                    <input type="text" id="nodeUrl" placeholder="Enter your RPC URL (e.g., Alchemy/Infura)">
+                 </div>
+                 <div class="config-grid-item">
+                    <label for="rebalancerAddress">Deployed Rebalancer Address:</label>
+                    <input type="text" id="rebalancerAddress" placeholder="0xYourDeployedContractAddress">
+                 </div>
+                 <button id="btnLoadContract" onclick="loadContract()" disabled>Load Contract Data</button>
+                 <span id="loadStatus" class="status-value" style="display: block; margin-top: 8px;"></span>
+            </fieldset>
+
+            <fieldset class="frame hidden" id="ownerActionsFrame">
+                <h2>Owner Actions</h2>
+                <div class="status-section">
+                    <h3>Deposit Funds into Contract</h3>
+                    <div class="inline-group">
+                        <div> <label for="depositAmount0">USDL Amount:</label> <input type="number" id="depositAmount0" min="0" step="any" placeholder="0.0"> </div>
+                        <button class="approve-button" id="btnApprove0" onclick="approveToken(0)" disabled>Approve USDL</button>
+                    </div>
+                     <div class="inline-group">
+                        <div> <label for="depositAmount1">USDC Amount:</label> <input type="number" id="depositAmount1" min="0" step="any" placeholder="0.0"> </div>
+                        <button class="approve-button" id="btnApprove1" onclick="approveToken(1)" disabled>Approve USDC</button>
+                    </div>
+                    <button id="btnDeposit" onclick="depositFunds()" disabled>Deposit Tokens</button>
+                </div>
+                 <div class="status-section">
+                    <h3>Withdraw Funds from Contract</h3>
+                     <div class="inline-group">
+                        <div> <label for="withdrawAmount0">USDL Amount:</label> <input type="number" id="withdrawAmount0" min="0" step="any" placeholder="0.0"> </div>
+                         <div> <label for="withdrawAmount1">USDC Amount:</label> <input type="number" id="withdrawAmount1" min="0" step="any" placeholder="0.0"> </div>
+                    </div>
+                     <button id="btnWithdraw" onclick="withdrawFunds()" disabled>Withdraw Tokens</button>
+                     <button id="btnWithdrawAll" onclick="withdrawAllFunds()" disabled style="margin-left: 10px; background-color: var(--grey-button-bg); color: var(--grey-button-text);">Withdraw All</button>
+                 </div>
+                  <div class="status-section">
+                     <h3>Set Strategy Parameters</h3>
+                      <div class="inline-group">
+                         <div> <label for="newTargetRatio">Target USDL W(%):</label> <input type="number" id="newTargetRatio" min="0" max="100" step="0.1" placeholder="e.g., 50.0"> </div>
+                          <div> <label for="newThreshold">Threshold Dev(%):</label> <input type="number" id="newThreshold" min="0.1" max="49.9" step="0.1" placeholder="e.g., 1.0"> </div>
+                          <div> <label for="newSlippage">Slippage Tol(%):</label> <input type="number" id="newSlippage" min="0.1" max="9.9" step="0.1" placeholder="e.g., 0.5"> </div>
+                     </div>
+                      <button id="btnSetParams" onclick="setStrategyParams()" disabled>Update Parameters</button>
+                  </div>
+                   <div class="status-section">
+                      <h3>Set Keeper Address</h3>
+                       <label for="newKeeperAddress">Keeper Address (0x0 for public):</label> <input type="text" id="newKeeperAddress" placeholder="0x...">
+                       <button id="btnSetKeeper" onclick="setKeeper()" disabled>Set Keeper</button>
+                   </div>
+            </fieldset>
+
+             <fieldset class="frame">
+                <h2>Manual Trigger</h2>
+                 <button id="btnTriggerRebalance" onclick="triggerCheckRebalance()" disabled>Trigger Check & Rebalance</button>
+                 <p style="font-size: 0.85em; color: var(--text-light);">Anyone (or the designated keeper) can call this. Caller pays gas.</p>
+             </fieldset>
+
+        </div>
+
+        <div class="column">
+            <fieldset class="frame">
+                <h2>Dashboard</h2>
+                <div class="status-section">
+                     <h3>Pool State (Live)</h3>
+                     <div class="status-item"> <span class="status-label">Current Weights:</span><span id="currentWeights" class="status-value prominent">--% / --%</span></div>
+                     <div class="status-item"> <span class="status-label">Deviation:</span><span id="currentDeviation" class="status-value">--%</span></div>
+                     <div class="status-item"> <span class="status-label">Pool Balances:</span><span id="poolBalances" class="status-value">USDL: -- / USDC: --</span></div>
+                </div>
+                 <div class="status-section">
+                      <h3>Rebalancer Contract State</h3>
+                      <div class="status-item"> <span class="status-label">Target Weights:</span><span id="targetWeights" class="status-value">USDL: --% / USDC: --%</span></div>
+                      <div class="status-item"> <span class="status-label">Threshold:</span><span id="displayThreshold" class="status-value">--%</span></div>
+                      <div class="status-item"> <span class="status-label">Slippage Tolerance:</span><span id="slippageTolerance" class="status-value">--%</span></div>
+                      <div class="status-item"> <span class="status-label">Contract Balances:</span><div style="text-align: right;"><span id="contractToken0Balance" class="status-value">USDL: --</span><br><span id="contractToken1Balance" class="status-value">USDC: --</span></div></div>
+                      <div class="status-item"> <span class="status-label">Owner Address:</span><span id="ownerAddress" class="status-value address-display">N/A</span></div>
+                      <div class="status-item"> <span class="status-label">Keeper Address:</span><span id="keeperAddress" class="status-value address-display">N/A</span></div>
+                 </div>
+                 <div class="status-section">
+                      <h3>Transaction Status</h3>
+                      <div id="txStatusArea">Connect wallet and load contract...</div>
+                 </div>
+            </fieldset>
+
+             <fieldset class="frame">
+                <h2>Logs</h2>
+                <textarea id="logArea" readonly></textarea>
+             </fieldset>
+        </div>
+
+    </div>
+<script>
+    // --- Configuration ---
+    let NODE_URL = '';
+    let REBALANCER_CONTRACT_ADDRESS = '';
+    // ABI Provided by user - inserted here
+    const REBALANCER_ABI = [ { "inputs": [], "name": "checkAndRebalance", "outputs": [ { "internalType": "bool", "name": "success", "type": "bool" } ], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [ { "internalType": "uint256", "name": "_amount0", "type": "uint256" }, { "internalType": "uint256", "name": "_amount1", "type": "uint256" } ], "name": "deposit", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [ { "internalType": "address", "name": "_pool", "type": "address" }, { "internalType": "address", "name": "_token0", "type": "address" }, { "internalType": "address", "name": "_token1", "type": "address" }, { "internalType": "address", "name": "_initialOwner", "type": "address" }, { "internalType": "uint256", "name": "_targetRatioToken0Bps", "type": "uint256" }, { "internalType": "uint256", "name": "_deviationThresholdBps", "type": "uint256" }, { "internalType": "uint256", "name": "_slippageToleranceBps", "type": "uint256" } ], "stateMutability": "nonpayable", "type": "constructor" }, { "inputs": [ { "internalType": "address", "name": "owner", "type": "address" } ], "name": "OwnableInvalidOwner", "type": "error" }, { "inputs": [ { "internalType": "address", "name": "account", "type": "address" } ], "name": "OwnableUnauthorizedAccount", "type": "error" }, { "inputs": [ { "internalType": "address", "name": "token", "type": "address" } ], "name": "SafeERC20FailedOperation", "type": "error" }, { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "sender", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount0", "type": "uint256" }, { "internalType": "uint256", "name": "amount1", "type": "uint256" } ], "name": "Deposited", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "oldKeeper", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newKeeper", "type": "address" } ], "name": "KeeperSet", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "previousOwner", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newOwner", "type": "address" } ], "name": "OwnershipTransferred", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": false, "internalType": "address", "name": "caller", "type": "address" } ], "name": "RebalanceAttempted", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": false, "internalType": "bool", "name": "deviationExceeded", "type": "bool" }, { "indexed": false, "internalType": "uint256", "name": "currentRatioToken0Bps", "type": "uint256" } ], "name": "RebalanceChecked", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": false, "internalType": "string", "name": "reason", "type": "string" } ], "name": "RebalanceFailed", "type": "event" }, { "anonymous": false, "inputs": [ { "indexed": false, "internalType": "int128", "name": "soldTokenIndex", "type": "int128" }, { "indexed": false, "internalType": "int128", "name": "boughtTokenIndex", "type": "int128" }, { "indexed": false, "internalType": "uint256", "name": "amountSold", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "amountReceived", "type": "uint256" } ], "name": "Rebalanced", "type": "event" }, { "inputs": [], "name": "renounceOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [ { "internalType": "address", "name": "_newKeeper", "type": "address" } ], "name": "setKeeper", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [ { "internalType": "uint256", "name": "_targetRatioToken0Bps", "type": "uint256" }, { "internalType": "uint256", "name": "_deviationThresholdBps", "type": "uint256" }, { "internalType": "uint256", "name": "_slippageToleranceBps", "type": "uint256" } ], "name": "setStrategyParams", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [ { "indexed": false, "internalType": "uint256", "name": "targetRatioToken0Bps", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "thresholdBps", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "slippageBps", "type": "uint256" } ], "name": "StrategyParamsSet", "type": "event" }, { "inputs": [ { "internalType": "address", "name": "newOwner", "type": "address" } ], "name": "transferOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [ { "internalType": "uint256", "name": "_amount0", "type": "uint256" }, { "internalType": "uint256", "name": "_amount1", "type": "uint256" }, { "internalType": "address", "name": "_recipient", "type": "address" } ], "name": "withdraw", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [], "name": "withdrawAll", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "recipient", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount0", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "amount1", "type": "uint256" } ], "name": "Withdrawn", "type": "event" }, { "inputs": [], "name": "curvePool", "outputs": [ { "internalType": "contract ICurveStableSwap", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "decimals0", "outputs": [ { "internalType": "uint8", "name": "", "type": "uint8" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "decimals1", "outputs": [ { "internalType": "uint8", "name": "", "type": "uint8" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "deviationThresholdBps", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getCurrentDeviation", "outputs": [ { "internalType": "uint256", "name": "deviationBps", "type": "uint256" }, { "internalType": "bool", "name": "isOverweight0", "type": "bool" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getToken0Balance", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getToken1Balance", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "keeper", "outputs": [ { "internalType": "address", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "owner", "outputs": [ { "internalType": "address", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "slippageToleranceBps", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "targetRatioToken0Bps", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "token0", "outputs": [ { "internalType": "contract IERC20", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "token1", "outputs": [ { "internalType": "contract IERC20", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" } ];
+    // Standard ERC20 ABI subset needed
+    const ERC20_ABI = [ "function approve(address spender, uint256 amount) public returns (bool)", "function allowance(address owner, address spender) public view returns (uint256)", "function decimals() public view returns (uint8)", "function symbol() public view returns (string)", "function balanceOf(address account) public view returns (uint256)" ];
+    // Minimal Curve Pool ABI needed
+    const CURVE_POOL_ABI = [ "function balances(uint256 i) public view returns (uint256)" ];
+    // Constants derived from contract state later
+    let TOKEN0_ADDRESS = ethers.ZeroAddress;
+    let TOKEN1_ADDRESS = ethers.ZeroAddress;
+    let CURVE_POOL_ADDRESS = ethers.ZeroAddress;
+    let DECIMALS0 = 18; // Default, will be updated from contract
+    let DECIMALS1 = 6;  // Default, will be updated from contract
+    let TOKEN0_SYMBOL = 'TKN0'; // Default, will be updated
+    let TOKEN1_SYMBOL = 'TKN1'; // Default, will be updated
+
+    // --- Application State ---
+    let provider = null;
+    let signer = null;
+    let signerAddress = null;
+    let network = null;
+    let rebalancerContract = null;
+    let token0Contract = null;
+    let token1Contract = null;
+    let curvePoolContract = null;
+    let contractOwner = null;
+    let isOwnerConnected = false;
+    let statusIntervalId = null;
+
+    // --- DOM Elements (Populated on DOMContentLoaded) ---
+    let elements = {}; // Initialize empty, populate on DOMContentLoaded
+
+    // --- Logging ---
+    function logMessage(message) {
+        if (elements.logArea) { const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); elements.logArea.value += `[${timestamp}] ${message}\n`; elements.logArea.scrollTop = elements.logArea.scrollHeight; }
+        else { console.log(`Log (elements not ready): ${message}`); }
+    }
+    function logTxStatus(message, isError = false, isLoading = false) {
+        if (elements.txStatusArea) { elements.txStatusArea.innerHTML = ''; elements.txStatusArea.textContent = message; elements.txStatusArea.style.color = isError ? 'var(--red-status)' : 'var(--text-medium)'; if (isLoading) { const spinner = document.createElement('div'); spinner.className = 'spinner'; elements.txStatusArea.appendChild(spinner); } }
+        else { console.log(`TxStatus (elements not ready): ${message}`); }
+     }
+
+    // --- Wallet Connection ---
+    async function connectWallet() {
+        logMessage("Connecting wallet..."); logTxStatus("Connecting wallet...", false, true);
+        if (typeof window.ethereum === 'undefined') { logMessage("ERROR: MetaMask not detected."); logTxStatus("MetaMask not detected!", true); alert('MetaMask is not installed.'); return; }
+        try {
+            if (typeof ethers === 'undefined') { throw new Error("Ethers.js library not loaded."); }
+            provider = new ethers.BrowserProvider(window.ethereum, 'any'); const accounts = await provider.send("eth_requestAccounts", []); if (accounts.length === 0) throw new Error("No accounts found/selected.");
+            signer = await provider.getSigner(); signerAddress = await signer.getAddress(); network = await provider.getNetwork();
+            elements.accountAddress.textContent = signerAddress; elements.networkName.textContent = `${network.name} (ID: ${network.chainId})`; elements.connectionStatus.textContent = 'Connected'; elements.connectionStatus.className = 'status-value connected'; elements.btnConnectWallet.textContent = 'Wallet Connected'; elements.btnConnectWallet.disabled = true; elements.btnLoadContract.disabled = false;
+            logMessage(`Wallet connected: ${signerAddress} on ${network.name}`); logTxStatus("Wallet connected.");
+            window.ethereum.removeAllListeners('accountsChanged'); window.ethereum.removeAllListeners('chainChanged'); window.ethereum.on('accountsChanged', handleAccountsChanged); window.ethereum.on('chainChanged', handleChainChanged);
+        } catch (error) { logMessage(`ERROR connecting wallet: ${error.message}`); logTxStatus(`Wallet Connection Error: ${error.message}`, true); console.error("Wallet connection error:", error); elements.connectionStatus.textContent = 'Connection Failed'; elements.connectionStatus.className = 'status-value error'; elements.btnConnectWallet.disabled = false; elements.btnLoadContract.disabled = true; }
+    }
+    function handleAccountsChanged(accounts) { if (accounts.length === 0) { logMessage("Wallet disconnected or locked."); resetAppConnection(); } else { logMessage("Account changed. Reconnecting..."); connectWallet(); } }
+    function handleChainChanged(_chainId) { logMessage("Network changed. Reloading page."); window.location.reload(); }
+    function resetAppConnection() { provider = null; signer = null; signerAddress = null; network = null; rebalancerContract = null; token0Contract = null; token1Contract = null; curvePoolContract = null; contractOwner = null; isOwnerConnected = false; if(statusIntervalId) clearInterval(statusIntervalId); statusIntervalId = null; elements.accountAddress.textContent = 'N/A'; elements.networkName.textContent = 'N/A'; elements.connectionStatus.textContent = 'Not Connected'; elements.connectionStatus.className = 'status-value disconnected'; elements.btnConnectWallet.textContent = 'Connect Wallet'; elements.btnConnectWallet.disabled = false; elements.btnLoadContract.disabled = true; elements.ownerActionsFrame.classList.add('hidden'); disableAllActionButtons(); logTxStatus("Wallet disconnected or network changed."); }
+
+    // --- Contract Loading & Interaction ---
+    async function loadContract() { /* ... same logic ... */
+        if (!provider || !signerAddress) { logMessage("ERROR: Wallet not connected."); return; }
+        NODE_URL = elements.nodeUrlInput.value.trim(); REBALANCER_CONTRACT_ADDRESS = elements.rebalancerAddressInput.value.trim();
+        if (!ethers.isAddress(REBALANCER_CONTRACT_ADDRESS)) { logMessage("ERROR: Invalid Rebalancer Contract Address."); elements.loadStatus.textContent = "Invalid Address!"; elements.loadStatus.style.color = "var(--red-status)"; return; }
+        if (!REBALANCER_ABI || REBALANCER_ABI.length === 0) { logMessage("ERROR: Rebalancer ABI is missing/empty in the script."); elements.loadStatus.textContent = "ABI Missing!"; elements.loadStatus.style.color = "var(--red-status)"; alert("ERROR: Rebalancer ABI is missing or empty in the script."); return; }
+        let readProvider = provider; if (NODE_URL) { try { readProvider = new ethers.JsonRpcProvider(NODE_URL); const readNetwork = await readProvider.getNetwork(); logMessage(`Using separate RPC for reads on network: ${readNetwork.name} (${readNetwork.chainId})`); if (readNetwork.chainId !== network.chainId) { logMessage("WARNING: Node URL network differs from connected wallet network!"); logTxStatus("Warning: Node URL network mismatch!", false); } } catch (error) { logMessage(`ERROR: Invalid Node RPC URL: ${error.message}. Using wallet provider instead.`); readProvider = provider; } } else { logMessage("INFO: Using wallet's provider for reads."); }
+        logMessage(`Loading contract at ${REBALANCER_CONTRACT_ADDRESS}...`); elements.loadStatus.textContent = "Loading..."; elements.loadStatus.style.color = "var(--text-light)"; disableAllActionButtons();
+        try {
+            rebalancerContract = new ethers.Contract(REBALANCER_CONTRACT_ADDRESS, REBALANCER_ABI, readProvider);
+            logMessage("Fetching token/pool addresses from contract...");
+            [TOKEN0_ADDRESS, TOKEN1_ADDRESS, CURVE_POOL_ADDRESS, contractOwner] = await Promise.all([ rebalancerContract.token0(), rebalancerContract.token1(), rebalancerContract.curvePool(), rebalancerContract.owner() ]);
+            logMessage(`Token0: ${TOKEN0_ADDRESS}, Token1: ${TOKEN1_ADDRESS}, Pool: ${CURVE_POOL_ADDRESS}`);
+            token0Contract = new ethers.Contract(TOKEN0_ADDRESS, ERC20_ABI, readProvider); token1Contract = new ethers.Contract(TOKEN1_ADDRESS, ERC20_ABI, readProvider); curvePoolContract = new ethers.Contract(CURVE_POOL_ADDRESS, CURVE_POOL_ABI, readProvider);
+            await updateStatusDisplayFromContracts(); // Initial fetch
+            logMessage(`Contract loaded. Owner: ${contractOwner}`); elements.loadStatus.textContent = "Contract Loaded"; elements.loadStatus.style.color = "var(--green-status)";
+            isOwnerConnected = (signerAddress && contractOwner && signerAddress.toLowerCase() === contractOwner.toLowerCase()); elements.ownerActionsFrame.classList.toggle('hidden', !isOwnerConnected);
+            enableActionButtons(); if (statusIntervalId) clearInterval(statusIntervalId); statusIntervalId = setInterval(updateStatusDisplayFromContracts, 15000);
+        } catch (error) { logMessage(`ERROR loading contract: ${error.message}`); console.error("Contract loading error:", error); elements.loadStatus.textContent = "Load Failed!"; elements.loadStatus.style.color = "var(--red-status)"; rebalancerContract = null; disableAllActionButtons(); }
+     }
+
+    async function updateStatusDisplayFromContracts() {
+        if (!elements.btnConnectWallet || !rebalancerContract || !curvePoolContract || !token0Contract || !token1Contract) { console.warn("updateStatusDisplayFromContracts called before elements or contracts initialized."); return; }
+        logMessage("Fetching contract status...");
+        try {
+            const [ poolBal0, poolBal1, contractBal0, contractBal1, targetBps, thresholdBps, slippageBps, currentOwner, currentKeeper, dec0BigInt, dec1BigInt, symbol0, symbol1 ] = await Promise.all([
+                curvePoolContract.balances(0).catch(e => {console.error("Error fetching poolBal0:", e); return 0n;}), curvePoolContract.balances(1).catch(e => {console.error("Error fetching poolBal1:", e); return 0n;}),
+                rebalancerContract.getToken0Balance().catch(e => {console.error("Error fetching contractBal0:", e); return 0n;}), rebalancerContract.getToken1Balance().catch(e => {console.error("Error fetching contractBal1:", e); return 0n;}),
+                rebalancerContract.targetRatioToken0Bps().catch(e => {console.error("Error fetching targetBps:", e); return 5000n;}), rebalancerContract.deviationThresholdBps().catch(e => {console.error("Error fetching thresholdBps:", e); return 100n;}), rebalancerContract.slippageToleranceBps().catch(e => {console.error("Error fetching slippageBps:", e); return 50n;}),
+                rebalancerContract.owner().catch(e => {console.error("Error fetching owner:", e); return ethers.ZeroAddress;}), rebalancerContract.keeper().catch(e => {console.error("Error fetching keeper:", e); return ethers.ZeroAddress;}),
+                token0Contract.decimals().catch(e => {console.error("Error fetching decimals0:", e); return 18n;}), token1Contract.decimals().catch(e => {console.error("Error fetching decimals1:", e); return 6n;}),
+                token0Contract.symbol().catch(e => {console.error("Error fetching symbol0:", e); return "TKN0";}), token1Contract.symbol().catch(e => {console.error("Error fetching symbol1:", e); return "TKN1";}) ]);
+            DECIMALS0 = Number(dec0BigInt); DECIMALS1 = Number(dec1BigInt); TOKEN0_SYMBOL = symbol0; TOKEN1_SYMBOL = symbol1;
+            contractOwner = currentOwner; isOwnerConnected = (signerAddress && contractOwner && signerAddress.toLowerCase() === contractOwner.toLowerCase());
+            const poolToken0Balance = parseFloat(ethers.formatUnits(poolBal0, DECIMALS0)); const poolToken1Balance = parseFloat(ethers.formatUnits(poolBal1, DECIMALS1));
+            const precisionFactor = 10n**18n; const normBal0 = (poolBal0 * precisionFactor) / (10n**BigInt(DECIMALS0)); const normBal1 = (poolBal1 * precisionFactor) / (10n**BigInt(DECIMALS1)); const totalNorm = normBal0 + normBal1;
+            const currentWeight0 = totalNorm > 0n ? Number(normBal0 * 10000n / totalNorm) / 10000 : 0.5; const targetWeight0 = Number(targetBps) / 10000; const devThreshold = Number(thresholdBps) / 10000; const slippageTolerance = Number(slippageBps) / 10000;
+            const deviation = Math.abs(currentWeight0 - targetWeight0); const isDeviationExceeded = deviation > devThreshold;
+
+            // Update UI elements using optional chaining ?. for safety
+            const formatPercent = (val) => (val === null || isNaN(val)) ? '--%' : val.toLocaleString(undefined, { style: 'percent', minimumFractionDigits: 2 });
+            const formatBalance = (val, decimals = 6) => { try { return ethers.formatUnits(val, decimals); } catch { return '--'; } };
+
+            if (elements.currentWeights) elements.currentWeights.textContent = `${TOKEN0_SYMBOL}: ${formatPercent(currentWeight0)} / ${TOKEN1_SYMBOL}: ${formatPercent(1.0-currentWeight0)}`;
+            if (elements.targetWeights) elements.targetWeights.textContent = `${TOKEN0_SYMBOL}: ${formatPercent(targetWeight0)} / ${TOKEN1_SYMBOL}: ${formatPercent(1.0-targetWeight0)}`;
+            if (elements.currentDeviation) elements.currentDeviation.textContent = formatPercent(deviation);
+            if (elements.displayThreshold) elements.displayThreshold.textContent = formatPercent(devThreshold);
+            if (elements.slippageTolerance) elements.slippageTolerance.textContent = formatPercent(slippageTolerance);
+            if (elements.poolBalances) elements.poolBalances.textContent = `${TOKEN0_SYMBOL}: ${parseFloat(formatBalance(poolBal0, DECIMALS0)).toLocaleString(undefined, {maximumFractionDigits:2})} / ${TOKEN1_SYMBOL}: ${parseFloat(formatBalance(poolBal1, DECIMALS1)).toLocaleString(undefined, {maximumFractionDigits:2})}`;
+            if (elements.contractToken0Balance) elements.contractToken0Balance.textContent = `${TOKEN0_SYMBOL}: ${formatBalance(contractBal0, DECIMALS0)}`;
+            if (elements.contractToken1Balance) elements.contractToken1Balance.textContent = `${TOKEN1_SYMBOL}: ${formatBalance(contractBal1, DECIMALS1)}`;
+            if (elements.ownerAddress) elements.ownerAddress.textContent = contractOwner;
+            if (elements.keeperAddress) elements.keeperAddress.textContent = currentKeeper === ethers.ZeroAddress ? 'None (Public)' : currentKeeper;
+            if (elements.rebalanceNeeded) {
+                 elements.rebalanceNeeded.textContent = isDeviationExceeded ? "YES" : "No";
+                 elements.rebalanceNeeded.className = `status-value ${isDeviationExceeded ? 'rebal-yes' : 'rebal-no'}`;
+            }
+            if (elements.ownerActionsFrame) elements.ownerActionsFrame.classList.toggle('hidden', !isOwnerConnected);
+            enableActionButtons();
+            logMessage("Status updated.");
+
+        } catch (error) {
+            logMessage(`ERROR fetching status: ${error.message}`); console.error("Status fetch error:", error);
+            if (elements.connectionStatus) {
+                 elements.connectionStatus.textContent = 'Error Fetching Status';
+                 elements.connectionStatus.className = 'status-value error';
+            }
+        }
+    }
+
+    function enableActionButtons() { /* ... same ... */ const c = !!signerAddress; const l = !!rebalancerContract; elements.btnTriggerRebalance.disabled=!c||!l; elements.btnApprove0.disabled=!c||!l||!isOwnerConnected; elements.btnApprove1.disabled=!c||!l||!isOwnerConnected; elements.btnDeposit.disabled=!c||!l||!isOwnerConnected; elements.btnWithdraw.disabled=!c||!l||!isOwnerConnected; elements.btnWithdrawAll.disabled=!c||!l||!isOwnerConnected; elements.btnSetParams.disabled=!c||!l||!isOwnerConnected; elements.btnSetKeeper.disabled=!c||!l||!isOwnerConnected; }
+    function disableAllActionButtons() { /* ... same ... */ elements.btnTriggerRebalance.disabled=true; elements.btnApprove0.disabled=true; elements.btnApprove1.disabled=true; elements.btnDeposit.disabled=true; elements.btnWithdraw.disabled=true; elements.btnWithdrawAll.disabled=true; elements.btnSetParams.disabled=true; elements.btnSetKeeper.disabled=true; }
+
+    // --- Transaction Functions ---
+    async function sendTransaction(contractCallPromise, actionName) { /* ... same ... */ if (!signer) { logMessage("ERROR: Wallet not connected."); logTxStatus("Wallet not connected.", true); return null; } logMessage(`Attempting: ${actionName}...`); logTxStatus(`Sending ${actionName} tx...`, false, true); try { const tx = await contractCallPromise; logMessage(`Tx sent: ${tx.hash}`); logTxStatus(`Tx sent (${actionName}). Confirming...`, false, true); const receipt = await tx.wait(); logMessage(`Tx confirmed: ${tx.hash} in block ${receipt.blockNumber}`); if (receipt.status === 1) { logTxStatus(`${actionName} successful! Block: ${receipt.blockNumber}`); await updateStatusDisplayFromContracts(); return receipt; } else { logMessage(`ERROR: ${actionName} tx reverted. Hash: ${tx.hash}`); logTxStatus(`${actionName} failed (reverted).`, true); return null; } } catch (error) { let reason = error?.reason; if (!reason && error?.data) { try { reason = ethers.toUtf8String('0x' + error.data.substring(138)); } catch { /* ignore */ } } if (!reason) reason = error?.message || 'Unknown error'; logMessage(`ERROR during ${actionName}: ${reason}`); console.error(`${actionName} error:`, error); logTxStatus(`Error (${actionName}): ${reason}`, true); return null; } finally { const currentStatus = elements.txStatusArea.textContent; if(currentStatus.includes('...')) logTxStatus(currentStatus.replace('...', ''), false); } }
+
+    // --- Owner Action Implementations ---
+    async function approveToken(tokenIndex) { if (!rebalancerContract || !signer) return; const tokenAddress = tokenIndex === 0 ? TOKEN0_ADDRESS : TOKEN1_ADDRESS; const tokenSymbol = tokenIndex === 0 ? TOKEN0_SYMBOL : TOKEN1_SYMBOL; const tokenContractInstance = tokenIndex === 0 ? token0Contract : token1Contract; if (!tokenContractInstance) { logMessage(`ERROR: ${tokenSymbol} contract not loaded.`); return; } const spenderAddress = REBALANCER_CONTRACT_ADDRESS; const approveAmount = ethers.MaxUint256; await sendTransaction( tokenContractInstance.connect(signer).approve(spenderAddress, approveAmount), `Approve ${tokenSymbol}` ); }
+    async function depositFunds() { if (!rebalancerContract || !signer) return; try { const amount0Str = elements.depositAmount0.value || '0'; const amount1Str = elements.depositAmount1.value || '0'; const amount0 = ethers.parseUnits(amount0Str, DECIMALS0); const amount1 = ethers.parseUnits(amount1Str, DECIMALS1); if (amount0 === 0n && amount1 === 0n) { logMessage("No deposit amount."); return; } await sendTransaction( rebalancerContract.connect(signer).deposit(amount0, amount1), "Deposit Funds" ); elements.depositAmount0.value = ''; elements.depositAmount1.value = ''; } catch (error) { logMessage(`Deposit Prep Error: ${error.message}`); logTxStatus(`Deposit Error: ${error.message}`, true); } }
+    async function withdrawFunds() { if (!rebalancerContract || !signer) return; try { const amount0Str = elements.withdrawAmount0.value || '0'; const amount1Str = elements.withdrawAmount1.value || '0'; const amount0 = ethers.parseUnits(amount0Str, DECIMALS0); const amount1 = ethers.parseUnits(amount1Str, DECIMALS1); if (amount0 === 0n && amount1 === 0n) { logMessage("No withdrawal amount."); return; } await sendTransaction( rebalancerContract.connect(signer).withdraw(amount0, amount1, signerAddress), "Withdraw Funds" ); elements.withdrawAmount0.value = ''; elements.withdrawAmount1.value = ''; } catch (error) { logMessage(`Withdraw Prep Error: ${error.message}`); logTxStatus(`Withdrawal Error: ${error.message}`, true); } }
+    async function withdrawAllFunds() { if (!rebalancerContract || !signer) return; await sendTransaction( rebalancerContract.connect(signer).withdrawAll(), "Withdraw All Funds" ); }
+    async function setStrategyParams() { if (!rebalancerContract || !signer) return; try { const targetRatioPercent = parseFloat(elements.newTargetRatio.value); const thresholdPercent = parseFloat(elements.newThreshold.value); const slippagePercent = parseFloat(elements.newSlippage.value); if (isNaN(targetRatioPercent) || isNaN(thresholdPercent) || isNaN(slippagePercent) || targetRatioPercent < 0 || targetRatioPercent > 100 || thresholdPercent <= 0 || thresholdPercent >= 50 || slippagePercent <= 0 || slippagePercent >= 10) { throw new Error("Invalid parameter values."); } const targetBps = BigInt(Math.round(targetRatioPercent * 100)); const thresholdBps = BigInt(Math.round(thresholdPercent * 100)); const slippageBps = BigInt(Math.round(slippagePercent * 100)); await sendTransaction( rebalancerContract.connect(signer).setStrategyParams(targetBps, thresholdBps, slippageBps), "Set Strategy Params" ); elements.newTargetRatio.value = ''; elements.newThreshold.value = ''; elements.newSlippage.value = ''; } catch (error) { logMessage(`Set Params Prep Error: ${error.message}`); logTxStatus(`Set Params Error: ${error.message}`, true); } }
+    async function setKeeper() { if (!rebalancerContract || !signer) return; try { const newKeeper = elements.newKeeperAddress.value.trim(); if (newKeeper !== '' && !ethers.isAddress(newKeeper)) { throw new Error("Invalid Keeper Address format."); } const addressToSet = newKeeper === '' ? ethers.ZeroAddress : newKeeper; await sendTransaction( rebalancerContract.connect(signer).setKeeper(addressToSet), "Set Keeper Address" ); elements.newKeeperAddress.value = ''; } catch (error) { logMessage(`Set Keeper Prep Error: ${error.message}`); logTxStatus(`Set Keeper Error: ${error.message}`, true); } }
+
+    // --- Manual Trigger ---
+    async function triggerCheckRebalance() { if (!rebalancerContract || !signer) return; await sendTransaction( rebalancerContract.connect(signer).checkAndRebalance(), "Trigger Rebalance Check" ); }
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        // Assign DOM elements to the elements object
+        elements = { // Populate the elements object here
+            btnConnectWallet: document.getElementById('btnConnectWallet'), connectionStatus: document.getElementById('connectionStatus'), accountAddress: document.getElementById('accountAddress'), networkName: document.getElementById('networkName'),
+            nodeUrlInput: document.getElementById('nodeUrl'), rebalancerAddressInput: document.getElementById('rebalancerAddress'), btnLoadContract: document.getElementById('btnLoadContract'), loadStatus: document.getElementById('loadStatus'),
+            currentWeights: document.getElementById('currentWeights'), targetWeights: document.getElementById('targetWeights'), currentDeviation: document.getElementById('currentDeviation'), displayThreshold: document.getElementById('displayThreshold'), poolBalances: document.getElementById('poolBalances'), slippageTolerance: document.getElementById('slippageTolerance'), contractToken0Balance: document.getElementById('contractToken0Balance'), contractToken1Balance: document.getElementById('contractToken1Balance'), ownerAddress: document.getElementById('ownerAddress'), keeperAddress: document.getElementById('keeperAddress'), rebalanceNeeded: document.getElementById('rebalanceNeeded'),
+            ownerActionsFrame: document.getElementById('ownerActionsFrame'), depositAmount0: document.getElementById('depositAmount0'), btnApprove0: document.getElementById('btnApprove0'), depositAmount1: document.getElementById('depositAmount1'), btnApprove1: document.getElementById('btnApprove1'), btnDeposit: document.getElementById('btnDeposit'), withdrawAmount0: document.getElementById('withdrawAmount0'), withdrawAmount1: document.getElementById('withdrawAmount1'), btnWithdraw: document.getElementById('btnWithdraw'), btnWithdrawAll: document.getElementById('btnWithdrawAll'), newTargetRatio: document.getElementById('newTargetRatio'), newThreshold: document.getElementById('newThreshold'), newSlippage: document.getElementById('newSlippage'), btnSetParams: document.getElementById('btnSetParams'), newKeeperAddress: document.getElementById('newKeeperAddress'), btnSetKeeper: document.getElementById('btnSetKeeper'),
+            btnTriggerRebalance: document.getElementById('btnTriggerRebalance'),
+            txStatusArea: document.getElementById('txStatusArea'), logArea: document.getElementById('logArea')
+        };
+
+        logMessage("Functional Frontend Initialized. Connect wallet & load contract.");
+        logTxStatus("Connect wallet and load contract..."); // Initial status message
+    });
+
+</script>
+
+</body>
+</html>
